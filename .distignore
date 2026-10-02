@@ -1,0 +1,5 @@
+.git
+.gitignore
+.distignore
+.wp-env.json
+node_modules

@@ -1,0 +1,7 @@
+{
+  "core": null,
+  "plugins": [
+    ".",
+    "https://github.com/WordPress/mcp-adapter/releases/latest/download/mcp-adapter.zip"
+  ]
+}
