@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       Atelier MCP
- * Plugin URI:        https://github.com/davidcaroo/atelier-mcp
+ * Plugin URI:        https://github.com/dev-bahari/atelier-mcp
  * Description:       Connect Claude, Codex or any MCP client to WordPress to audit, redesign and optimize your site.
  * Version:           0.2.0
  * Requires at least: 6.9
