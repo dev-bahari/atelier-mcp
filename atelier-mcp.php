@@ -1,9 +1,9 @@
 <?php
 /**
  * Plugin Name:       Atelier MCP
- * Plugin URI:        https://github.com/bahariaqua/atelier-mcp
+ * Plugin URI:        https://github.com/davidcaroo/atelier-mcp
  * Description:       Connect Claude, Codex or any MCP client to WordPress to audit, redesign and optimize your site.
- * Version:           0.1.0
+ * Version:           0.2.0
  * Requires at least: 6.9
  * Requires PHP:      7.4
  * Author:            Bahari S.A.S.
@@ -14,10 +14,22 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'ATELIER_MCP_VERSION', '0.1.0' );
+define( 'ATELIER_MCP_VERSION', '0.2.0' );
 
+require __DIR__ . '/includes/log.php';
 require __DIR__ . '/includes/abilities-read.php';
+require __DIR__ . '/includes/abilities-write.php';
 require __DIR__ . '/includes/admin.php';
+
+register_activation_hook( __FILE__, 'atelier_install' );
+add_action(
+	'plugins_loaded',
+	static function () {
+		if ( ! get_option( 'atelier_mcp_db' ) ) {
+			atelier_install(); // Updated in place without reactivation.
+		}
+	}
+);
 
 add_action(
 	'wp_abilities_api_categories_init',
@@ -32,7 +44,7 @@ add_action(
 	}
 );
 
-add_action( 'wp_abilities_api_init', 'atelier_register_read_abilities' );
+add_action( 'wp_abilities_api_init', 'atelier_register_abilities' );
 
 // The MCP transport comes from the official MCP Adapter plugin (WordPress/mcp-adapter).
 add_action(

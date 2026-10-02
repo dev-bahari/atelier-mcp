@@ -102,6 +102,13 @@ function atelier_read_abilities() {
 			),
 			'atelier_list_patterns',
 		),
+		'atelier/list-menus'        => array(
+			'List menus',
+			'Navigation menus (wp_navigation) with their block markup. Use the id with atelier_update_menu.',
+			'edit_theme_options',
+			array(),
+			'atelier_list_menus',
+		),
 		'atelier/list-media'        => array(
 			'List media',
 			'Media library images with file size, dimensions, mime type and alt text. Set missing_alt=true to only get images without alt.',
@@ -142,14 +149,35 @@ function atelier_read_abilities() {
  * @return string[]
  */
 function atelier_ability_names() {
-	return array_keys( atelier_read_abilities() );
+	return array_keys( atelier_abilities() );
 }
 
 /**
- * Registers every read ability.
+ * All abilities: read + write.
+ *
+ * @return array
  */
-function atelier_register_read_abilities() {
-	foreach ( atelier_read_abilities() as $name => list( $label, $description, $cap, $props, $callback ) ) {
+function atelier_abilities() {
+	return atelier_read_abilities() + atelier_write_abilities();
+}
+
+/**
+ * Registers every ability. Write abilities pass through the rate limit guard.
+ */
+function atelier_register_abilities() {
+	foreach ( atelier_abilities() as $name => $definition ) {
+		list( $label, $description, $cap, $props, $callback ) = $definition;
+		$annotations = $definition[5] ?? array(
+			'readonly'    => true,
+			'destructive' => false,
+			'idempotent'  => true,
+		);
+		if ( empty( $annotations['readonly'] ) ) {
+			$callback = static function ( $input = null ) use ( $callback ) {
+				$guard = atelier_guard();
+				return is_wp_error( $guard ) ? $guard : call_user_func( $callback, $input );
+			};
+		}
 		$args = array(
 			'label'               => $label,
 			'description'         => $description,
@@ -160,11 +188,7 @@ function atelier_register_read_abilities() {
 			},
 			'meta'                => array(
 				'mcp'         => array( 'public' => true ),
-				'annotations' => array(
-					'readonly'    => true,
-					'destructive' => false,
-					'idempotent'  => true,
-				),
+				'annotations' => $annotations,
 			),
 		);
 		if ( $props ) {
@@ -212,22 +236,11 @@ function atelier_seo_plugin() {
  * @return array
  */
 function atelier_seo_meta( $id ) {
-	$keys = array(
-		'yoast'    => array( '_yoast_wpseo_title', '_yoast_wpseo_metadesc' ),
-		'rankmath' => array( 'rank_math_title', 'rank_math_description' ),
-	);
-	$plugin = atelier_seo_plugin();
-	if ( ! $plugin ) {
-		return array(
-			'plugin'      => null,
-			'title'       => null,
-			'description' => null,
-		);
-	}
+	list( $title, $description ) = atelier_seo_keys();
 	return array(
-		'plugin'      => $plugin,
-		'title'       => get_post_meta( $id, $keys[ $plugin ][0], true ) ?: null,
-		'description' => get_post_meta( $id, $keys[ $plugin ][1], true ) ?: null,
+		'plugin'      => atelier_seo_plugin() ?? 'atelier',
+		'title'       => get_post_meta( $id, $title, true ) ?: null,
+		'description' => get_post_meta( $id, $description, true ) ?: null,
 	);
 }
 
@@ -473,6 +486,35 @@ function atelier_list_patterns( $input ) {
 }
 
 /**
+ * List navigation menus.
+ *
+ * @return array|WP_Error
+ */
+function atelier_list_menus() {
+	$menus = atelier_rest(
+		'GET',
+		'/wp/v2/navigation',
+		array(
+			'context'  => 'edit',
+			'per_page' => 100,
+		)
+	);
+	if ( is_wp_error( $menus ) ) {
+		return $menus;
+	}
+	$items = array();
+	foreach ( $menus as $menu ) {
+		$items[] = array(
+			'id'      => $menu['id'],
+			'title'   => $menu['title']['raw'],
+			'status'  => $menu['status'],
+			'content' => $menu['content']['raw'],
+		);
+	}
+	return array( 'items' => $items );
+}
+
+/**
  * List media.
  *
  * @param array $input Input.
@@ -549,7 +591,7 @@ function atelier_audit_seo( $input ) {
 		if ( '' === trim( $post->post_title ) ) {
 			$found[] = 'empty_title';
 		}
-		if ( $plugin && ! $seo['description'] ) {
+		if ( ! $seo['description'] ) {
 			$found[] = 'missing_meta_description';
 		}
 		$h1 = preg_match_all( '/<h1[\s>]/i', $post->post_content );
@@ -584,7 +626,7 @@ function atelier_audit_seo( $input ) {
 	return array(
 		'audited'          => count( $posts ),
 		'seo_plugin'       => $plugin,
-		'note'             => $plugin ? null : 'No SEO plugin detected: meta descriptions cannot be checked.',
+		'note'             => $plugin ? null : 'No SEO plugin detected: Atelier prints its own title/description tags (set them with atelier_update_seo_meta).',
 		'duplicate_titles' => $duplicates,
 		'pages_with_issues' => $issues,
 		'blog_public'      => (bool) get_option( 'blog_public' ),

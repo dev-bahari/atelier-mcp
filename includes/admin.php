@@ -19,6 +19,42 @@ add_action(
 				'sanitize_callback' => 'rest_sanitize_boolean',
 			)
 		);
+		register_setting(
+			'atelier_mcp',
+			'atelier_mcp_writes',
+			array(
+				'type'              => 'boolean',
+				'default'           => true,
+				'sanitize_callback' => 'rest_sanitize_boolean',
+			)
+		);
+		register_setting(
+			'atelier_mcp',
+			'atelier_mcp_mode',
+			array(
+				'type'              => 'string',
+				'default'           => 'approval',
+				'sanitize_callback' => static function ( $value ) {
+					return 'full' === $value ? 'full' : 'approval';
+				},
+			)
+		);
+	}
+);
+
+add_action(
+	'admin_post_atelier_rollback',
+	static function () {
+		$id = isset( $_POST['change_id'] ) ? absint( $_POST['change_id'] ) : 0;
+		check_admin_referer( 'atelier_rollback_' . $id );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Sorry, you are not allowed to do that.', 'atelier-mcp' ) );
+		}
+		$result = atelier_rollback_change( $id );
+		$notice = is_wp_error( $result ) ? $result->get_error_message() : sprintf( /* translators: %d: change id */ __( 'Change #%d reverted.', 'atelier-mcp' ), $id );
+		set_transient( 'atelier_notice_' . get_current_user_id(), $notice, 60 );
+		wp_safe_redirect( admin_url( 'options-general.php?page=atelier-mcp' ) );
+		exit;
 	}
 );
 
@@ -51,15 +87,35 @@ add_action(
  */
 function atelier_render_settings() {
 	$url  = rest_url( 'atelier-mcp/v1/mcp' );
-	$user = wp_get_current_user()->user_login;
+	$user   = wp_get_current_user()->user_login;
+	$notice = get_transient( 'atelier_notice_' . get_current_user_id() );
+	delete_transient( 'atelier_notice_' . get_current_user_id() );
 	?>
 	<div class="wrap">
 		<h1>Atelier MCP</h1>
+		<?php if ( $notice ) : ?>
+			<div class="notice notice-info"><p><?php echo esc_html( $notice ); ?></p></div>
+		<?php endif; ?>
 		<form method="post" action="options.php">
 			<?php settings_fields( 'atelier_mcp' ); ?>
 			<label>
 				<input type="checkbox" name="atelier_mcp_enabled" value="1" <?php checked( get_option( 'atelier_mcp_enabled', true ) ); ?>>
 				<?php esc_html_e( 'Enable the MCP endpoint', 'atelier-mcp' ); ?>
+			</label><br>
+			<label>
+				<input type="checkbox" name="atelier_mcp_writes" value="1" <?php checked( get_option( 'atelier_mcp_writes', true ) ); ?>>
+				<?php esc_html_e( 'Allow write tools (otherwise the agent can only read and audit)', 'atelier-mcp' ); ?>
+			</label>
+			<h2><?php esc_html_e( 'Publishing mode', 'atelier-mcp' ); ?></h2>
+			<label>
+				<input type="radio" name="atelier_mcp_mode" value="approval" <?php checked( 'full' !== get_option( 'atelier_mcp_mode', 'approval' ) ); ?>>
+				<strong><?php esc_html_e( 'With approval (recommended)', 'atelier-mcp' ); ?></strong> –
+				<?php esc_html_e( 'the agent only creates drafts. Edits to published pages go to a draft copy; when you publish it, the changes are applied to the original. Site-wide design changes are proposals only.', 'atelier-mcp' ); ?>
+			</label><br>
+			<label>
+				<input type="radio" name="atelier_mcp_mode" value="full" <?php checked( 'full', get_option( 'atelier_mcp_mode', 'approval' ) ); ?>>
+				<strong><?php esc_html_e( 'Full access', 'atelier-mcp' ); ?></strong> –
+				<?php esc_html_e( 'the agent publishes and changes styles, templates and menus live. Every change can be reverted below.', 'atelier-mcp' ); ?>
 			</label>
 			<?php submit_button(); ?>
 		</form>
@@ -101,6 +157,29 @@ http_headers = { Authorization = "Basic BASE64" }</code></pre>
     }
   }
 }</code></pre>
+
+		<h2><?php esc_html_e( 'Recent changes', 'atelier-mcp' ); ?></h2>
+		<table class="widefat striped">
+			<thead><tr><th>#</th><th><?php esc_html_e( 'Date (UTC)', 'atelier-mcp' ); ?></th><th><?php esc_html_e( 'User', 'atelier-mcp' ); ?></th><th><?php esc_html_e( 'Change', 'atelier-mcp' ); ?></th><th></th></tr></thead>
+			<tbody>
+			<?php foreach ( atelier_list_changes( array( 'limit' => 30 ) )['items'] as $change ) : ?>
+				<tr>
+					<td><?php echo (int) $change['id']; ?></td>
+					<td><?php echo esc_html( $change['created_at'] ); ?></td>
+					<td><?php echo esc_html( get_the_author_meta( 'user_login', $change['user_id'] ) ); ?></td>
+					<td><?php echo esc_html( $change['summary'] ); ?></td>
+					<td>
+						<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+							<input type="hidden" name="action" value="atelier_rollback">
+							<input type="hidden" name="change_id" value="<?php echo (int) $change['id']; ?>">
+							<?php wp_nonce_field( 'atelier_rollback_' . $change['id'] ); ?>
+							<button class="button" onclick="return confirm('<?php echo esc_js( __( 'Revert this change?', 'atelier-mcp' ) ); ?>')"><?php esc_html_e( 'Revert', 'atelier-mcp' ); ?></button>
+						</form>
+					</td>
+				</tr>
+			<?php endforeach; ?>
+			</tbody>
+		</table>
 	</div>
 	<?php
 }
